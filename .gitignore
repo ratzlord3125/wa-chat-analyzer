@@ -1,0 +1,25 @@
+# Private data — never commit real WhatsApp exports used for testing
+*.zip
+_chat.txt
+WhatsApp Chat with *.txt
+WhatsApp Chat - *.txt
+
+# Generated reports (the script writes these next to its input)
+*_analysis.html
+*_analysis.pdf
+*_analysis_print.html
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# Editor / OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
