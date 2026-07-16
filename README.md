@@ -6,7 +6,7 @@ runs **in your browser**; your chat is never uploaded.
 
 ## 🔗 Live app
 
-**Open it here → https://YOUR-USERNAME.github.io/YOUR-REPO/**
+**Open it here → https://ratzlord3125.github.io/wa-chat-analyzer/**
 
 No install needed — open the link, drop in your exported chat, and view or download the report.
 *(After you enable GitHub Pages, replace the URL above with your actual page address.)*
