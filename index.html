@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WhatsApp Chat Analyzer</title>
+<style>
+  :root{ --green:#25D366; --teal:#128C7E; --dark:#075E54; --bg:#ece5dd; --ink:#111b21; --muted:#54656f; }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);}
+  .app{max-width:980px;margin:0 auto;padding:22px 16px 70px;}
+  .hero{background:linear-gradient(135deg,#075E54,#128C7E);color:#fff;border-radius:18px;padding:26px 28px;box-shadow:0 8px 24px rgba(0,0,0,.15);}
+  .hero h1{margin:0 0 6px;font-size:26px}
+  .hero .tag{margin:0;opacity:.92;font-size:14px}
+  .card{background:#fff;border-radius:16px;box-shadow:0 2px 10px rgba(0,0,0,.07);}
+  .panel{padding:20px;margin-top:18px}
+  .drop{border:2px dashed #cfd8dc;border-radius:14px;padding:26px;text-align:center;transition:.15s;cursor:pointer;background:#fbfefc}
+  .drop.over{border-color:var(--green);background:#f0faf5}
+  .drop-ic{font-size:34px}
+  .drop p{margin:6px 0}
+  .fname{color:var(--dark);font-weight:600;margin-top:8px!important}
+  .link{background:none;border:none;color:var(--teal);font:inherit;cursor:pointer;text-decoration:underline;padding:0}
+  .muted{color:var(--muted)} .small{font-size:12.5px}
+  .params{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-top:18px}
+  .field label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:5px;font-weight:600}
+  .field input,.field select{width:100%;padding:9px 11px;border:1px solid #d5dde0;border-radius:9px;font:inherit;background:#fff}
+  .field .row{display:flex;align-items:center;gap:8px}
+  .field .row input{width:96px}
+  .unit{font-size:13px;color:var(--muted)}
+  .actions{display:flex;align-items:center;gap:14px;margin-top:20px;flex-wrap:wrap}
+  .btn{padding:10px 16px;border-radius:10px;border:1px solid #d5dde0;background:#fff;font:inherit;cursor:pointer;font-weight:600;color:var(--ink)}
+  .btn:hover{background:#f5f7f8}
+  .btn.primary{background:var(--green);border-color:var(--green);color:#0a3d2b}
+  .btn.primary:disabled{background:#b9e6cd;border-color:#b9e6cd;color:#5a7a6b;cursor:not-allowed}
+  .btn.ghost{background:transparent}
+  .status{font-size:13px;color:var(--muted)}
+  .spin{display:inline-block;width:13px;height:13px;border:2px solid #cfd8dc;border-top-color:var(--teal);border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px;margin-right:6px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .loading{margin-top:18px;background:#f0faf5;border:1px solid #cdeede;border-radius:12px;padding:15px 16px}
+  .loading.done{display:none}
+  .loading .lmsg{font-size:13.5px;color:#0a3d2b;font-weight:600}
+  .bar{height:8px;background:#dcebe4;border-radius:6px;overflow:hidden;margin:11px 0 8px;position:relative}
+  .bar>i{position:absolute;left:-40%;width:40%;height:100%;background:linear-gradient(90deg,transparent,var(--green),transparent);animation:slide 1.15s ease-in-out infinite}
+  @keyframes slide{to{left:110%}}
+  .loading.error{background:#fdecec;border-color:#f3c4c4}
+  .loading.error .lmsg{color:#8a1c1c}
+  .loading.error .spin{display:none}
+  .loading.error .bar{display:none}
+  .pdfnote{font-size:12px;color:var(--muted);margin:8px 0 0;width:100%}
+  .results{margin-top:22px}
+  .resbar{padding:14px 18px;display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap}
+  .summary{font-size:14px}
+  .resbtns{display:flex;gap:8px;flex-wrap:wrap}
+  .report{width:100%;border:none;border-radius:14px;background:#ece5dd;min-height:600px;margin-top:14px;box-shadow:0 2px 10px rgba(0,0,0,.07)}
+  .foot{margin-top:28px;text-align:center;color:var(--muted);font-size:13px}
+  .foot a{color:var(--teal)}
+  code{background:#eef2f3;padding:1px 5px;border-radius:5px;font-size:12.5px}
+  @media(max-width:560px){ .hero h1{font-size:22px} }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="hero">
+    <h1>&#128172; WhatsApp Chat Analyzer</h1>
+    <p class="tag">Upload an exported chat and get a full stats report &mdash; processed entirely in your browser. Nothing is uploaded.</p>
+  </header>
+
+  <section class="card panel">
+    <div id="drop" class="drop">
+      <input id="file" type="file" accept=".zip,.txt" hidden>
+      <div class="drop-inner">
+        <div class="drop-ic">&#128194;</div>
+        <p><strong>Drop your exported chat here</strong> or <button type="button" id="browse" class="link">browse</button></p>
+        <p class="muted small">A WhatsApp export <code>.zip</code> (or the <code>_chat.txt</code> inside it). Export <em>without media</em>.</p>
+        <p id="fname" class="fname"></p>
+      </div>
+    </div>
+
+    <div class="params">
+      <div class="field">
+        <label for="gap">New-conversation gap</label>
+        <div class="row">
+          <input id="gap" type="number" min="1" step="1" value="180">
+          <span class="unit">minutes <span id="gaphint" class="muted"></span></span>
+        </div>
+      </div>
+      <div class="field">
+        <label for="dateorder">Date order</label>
+        <select id="dateorder">
+          <option value="auto" selected>Auto-detect</option>
+          <option value="dmy">Day / Month / Year</option>
+          <option value="mdy">Month / Day / Year</option>
+          <option value="ymd">Year / Month / Day</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="me">Your name (optional)</label>
+        <input id="me" type="text" placeholder="e.g. Aditya">
+      </div>
+    </div>
+
+    <div class="actions">
+      <button id="run" class="btn primary" disabled>Analyze</button>
+      <span id="status" class="status"></span>
+    </div>
+
+    <div id="loading" class="loading">
+      <div class="lmsg"><span class="spin"></span><span id="loadmsg">Starting&hellip;</span></div>
+      <div class="bar"><i></i></div>
+      <div class="muted small">First load downloads ~10&nbsp;MB (the Python runtime) and is cached, so next time is instant. Everything runs locally &mdash; nothing is uploaded.</div>
+    </div>
+  </section>
+
+  <section id="results" class="results" hidden>
+    <div class="resbar card">
+      <div id="summary" class="summary"></div>
+      <div class="resbtns">
+        <button id="dl" class="btn">&#11015; Download report (HTML)</button>
+        <button id="pdf" class="btn" title="Opens the expanded report and your browser's print dialog - allow pop-ups for this site">&#128424; Save as PDF</button>
+        <button id="newtab" class="btn ghost" title="Allow pop-ups for this site">&#8599; Open in new tab</button>
+      </div>
+      <p class="pdfnote">&#128161; Allow <strong>pop-ups</strong> for this site so <strong>Save as PDF</strong> and <strong>Open in new tab</strong> work &mdash; then choose &ldquo;Save as PDF&rdquo; in the print dialog.</p>
+    </div>
+    <iframe id="report" title="Analysis report" class="report"></iframe>
+  </section>
+
+  <footer class="foot">
+    <p>&#128274; 100% private &mdash; your chat is parsed locally in your browser with
+      <a href="https://pyodide.org" target="_blank" rel="noopener">Pyodide</a> and never leaves your device. Works offline after the first load.</p>
+    <p class="muted small">Open-source &middot; runs the same <code>whatsapp_analyzer.py</code> script, unchanged.</p>
+  </footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.28.3/full/pyodide.js"></script>
+<script>
+  const PY_INDEX = "https://cdn.jsdelivr.net/pyodide/v0.28.3/full/";
+  let pyodide = null, ready = false, selectedFile = null;
+  let curHtml = "", curExpanded = "", curName = "whatsapp";
+
+  const $ = (id) => document.getElementById(id);
+  function setStatus(html){ $("status").innerHTML = html; }
+  function busy(msg){ setStatus('<span class="spin"></span>' + msg); }
+
+  function updateGapHint(){
+    const m = parseInt($("gap").value) || 0;
+    let h = "";
+    if (m > 0 && m % 60 === 0){ const hr = m/60; h = "(= " + hr + " hour" + (hr !== 1 ? "s" : "") + ")"; }
+    else if (m >= 60){ h = "(= " + (m/60).toFixed(1) + " hours)"; }
+    $("gaphint").textContent = h;
+  }
+  $("gap").addEventListener("input", updateGapHint);
+  updateGapHint();
+
+  function pickFile(f){
+    if (!f) return;
+    selectedFile = f;
+    $("fname").textContent = "Selected: " + f.name;
+    maybeEnable();
+  }
+  function maybeEnable(){ $("run").disabled = !(ready && selectedFile); }
+
+  $("browse").addEventListener("click", () => $("file").click());
+  $("file").addEventListener("change", (e) => pickFile(e.target.files[0]));
+  const drop = $("drop");
+  ["dragenter","dragover"].forEach(ev => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave","drop"].forEach(ev => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
+  drop.addEventListener("drop", (e) => { if (e.dataTransfer.files.length) pickFile(e.dataTransfer.files[0]); });
+  drop.addEventListener("click", (e) => { if (e.target.id !== "browse") $("file").click(); });
+
+  function loadMsg(html){ $("loadmsg").innerHTML = html; }
+
+  async function init(){
+    try {
+      loadMsg("Downloading Python runtime&hellip; (~10&nbsp;MB, first time only)");
+      pyodide = await loadPyodide({ indexURL: PY_INDEX });
+      loadMsg("Starting Python&hellip;");
+      const resp = await fetch("whatsapp_analyzer.py", { cache: "no-store" });
+      if (!resp.ok) throw new Error("could not fetch whatsapp_analyzer.py (" + resp.status + ")");
+      const src = await resp.text();
+      pyodide.FS.writeFile("/tmp/wa.py", src);
+      loadMsg("Loading analyzer&hellip;");
+      pyodide.runPython(`
+import sys
+if "/tmp" not in sys.path:
+    sys.path.insert(0, "/tmp")
+import wa, os, json
+
+def run_web_analysis(path, gap, dateorder, me):
+    text, name = wa.read_chat_text(path)
+    msgs, meta = wa.parse(text, forced_order=dateorder)
+    if not any(m["sender"] for m in msgs):
+        raise ValueError("No messages could be parsed. Try a different Date order, or make sure this is a WhatsApp chat export.")
+    S = wa.analyze(msgs, session_gap_min=gap)
+    S["_gap_min"] = gap
+    base = os.path.basename(path)
+    return json.dumps({
+        "html": wa.build_html(S, name, base, me=me),
+        "expanded": wa.build_html(S, name, base, me=me, expand_all=True),
+        "name": name,
+        "total": S["total_messages"],
+        "participants": S["n_participants"],
+        "first": (S.get("first_dt") or "")[:10],
+        "last": (S.get("last_dt") or "")[:10],
+    })
+`);
+      ready = true;
+      $("loading").classList.add("done");
+      setStatus("Ready &mdash; drop a chat above and hit Analyze.");
+      maybeEnable();
+    } catch (err) {
+      console.error(err);
+      $("loading").classList.add("error");
+      if (location.protocol === "file:") {
+        loadMsg("&#9888; Can't load from a file:// path. Run a local server (see README) or open the GitHub Pages URL.");
+      } else {
+        loadMsg("&#9888; Failed to load: " + escapeHtml(err.message || String(err)));
+      }
+    }
+  }
+
+  function lastLine(e){
+    const s = (e && e.message) ? e.message : String(e);
+    const parts = s.trim().split("\n").filter(Boolean);
+    return parts[parts.length - 1] || "Error";
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"]/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+  }
+
+  async function analyze(){
+    if (!ready || !selectedFile) return;
+    $("run").disabled = true;
+    try {
+      const gap = parseInt($("gap").value) || 180;
+      const dateorder = $("dateorder").value === "auto" ? null : $("dateorder").value;
+      const me = $("me").value.trim() || null;
+      busy("Reading file&hellip;");
+      const bytes = new Uint8Array(await selectedFile.arrayBuffer());
+      const safe = (selectedFile.name || "chat.txt").replace(/[^\w.\- ]+/g, "_");
+      const path = "/tmp/" + safe;
+      pyodide.FS.writeFile(path, bytes);
+      pyodide.globals.set("_p", path);
+      pyodide.globals.set("_g", gap);
+      pyodide.globals.set("_d", dateorder);
+      pyodide.globals.set("_m", me);
+      busy("Analyzing&hellip; (large chats may take a few seconds)");
+      await new Promise((r) => setTimeout(r, 40));
+      let out;
+      try {
+        out = pyodide.runPython("run_web_analysis(_p, _g, _d, _m)");
+      } catch (e) {
+        console.error(e);
+        setStatus("&#9888; " + escapeHtml(lastLine(e)));
+        return;
+      }
+      const r = JSON.parse(out);
+      curHtml = r.html; curExpanded = r.expanded; curName = r.name || "whatsapp";
+      renderResult(r);
+      setStatus("Done &#10003;");
+    } finally {
+      $("run").disabled = !(ready && selectedFile);
+    }
+  }
+  $("run").addEventListener("click", analyze);
+
+  function renderResult(r){
+    $("results").hidden = false;
+    const span = r.first ? (r.first + " &rarr; " + r.last) : "";
+    $("summary").innerHTML = "<strong>" + escapeHtml(r.name) + "</strong> &middot; " +
+      Number(r.total).toLocaleString() + " messages &middot; " + r.participants + " participant(s)" +
+      (span ? " &middot; " + span : "");
+    const f = $("report");
+    f.onload = () => { try { f.style.height = (f.contentWindow.document.documentElement.scrollHeight + 30) + "px"; } catch (e) {} };
+    f.srcdoc = r.html;
+    $("results").scrollIntoView({ behavior: "smooth" });
+  }
+
+  function downloadBlob(text, filename){
+    const blob = new Blob([text], { type: "text/html;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+  function openInWindow(text, print){
+    const w = window.open("", "_blank");
+    if (!w){ alert("Please allow pop-ups for this site to use this button (or use Download report and open it manually)."); return; }
+    w.document.open(); w.document.write(text); w.document.close();
+    if (print){
+      const go = () => { try { w.focus(); w.print(); } catch (e) {} };
+      if (w.document.readyState === "complete") setTimeout(go, 400); else w.onload = () => setTimeout(go, 400);
+    }
+  }
+
+  $("dl").addEventListener("click", () => downloadBlob(curHtml, curName + "_analysis.html"));
+  $("newtab").addEventListener("click", () => openInWindow(curHtml, false));
+  $("pdf").addEventListener("click", () => openInWindow(curExpanded, true));
+
+  init();
+</script>
+</body>
+</html>
