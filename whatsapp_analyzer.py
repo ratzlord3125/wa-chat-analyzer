@@ -19,6 +19,42 @@ Options
     --session-gap        Minutes of silence that starts a new "conversation" (default: 180 = 3 hours)
     --me                 Your own display name, for framing (optional)
 
+How it works (for contributors)
+-------------------------------
+The program is a straight pipeline, each stage feeding the next:
+
+    read_chat_text()  ->  raw text of the chat log (+ a display name)
+    parse()           ->  list[message dict] + meta  (schema below)
+    analyze()         ->  one big stats dict `S` (all numbers and rankings)
+    build_html()      ->  a single self-contained HTML string (the report)
+
+main() wires these together for the command line and, with --pdf, hands the
+expanded HTML to export_pdf(). The web version (Pyodide) imports this module
+and calls the same four functions directly in the browser.
+
+Message schema (what parse() emits per line)
+---------------------------------------------
+    dt          datetime or None    (None if the timestamp could not be read)
+    sender      str or None         (None => a system / group-event line)
+    kind        "text" | "media" | "deleted" | "system"
+    media_type  image/video/audio/sticker/gif/document/contact/location/
+                "media" (generic) or None
+    view_once   bool                (best-effort only; see classify())
+    edited      bool
+    text        str                 (cleaned body, edit marker stripped)
+    n_words, n_chars                 ints (text messages only)
+    emojis      list[str]           (grapheme-grouped emoji tokens)
+    links       list[str]
+    has_q       bool                (body contains "?")
+
+Design notes
+------------
+* Standard library only, so the exact same file runs under Pyodide in a browser.
+* Charts are hand-written inline SVG (no chart library, no JS) so the report
+  stays one offline file.
+* The only genuinely tricky parsing is locale date-order detection; see
+  detect_date_order() for the evidence-based approach.
+
 No third-party packages required (standard library only). The HTML report is fully
 self-contained (inline CSS + inline SVG charts) and works offline — nothing is uploaded.
 """
@@ -150,6 +186,9 @@ toh to bas kar kr hi hu hun ho hai hain kyu kyun acha accha thik theek ab ye bha
 #  Reading the export
 # --------------------------------------------------------------------------- #
 
+# Load the chat text from a .zip export, a raw .txt, or a folder containing one.
+# For a zip we pick the most likely member (prefers "_chat.txt" / "WhatsApp Chat
+# with ...") and decode it. The returned display_name becomes the report title.
 def read_chat_text(path):
     """Return (chat_text, display_name) from a .zip, .txt, or folder."""
     display = os.path.splitext(os.path.basename(path.rstrip("/\\")))[0]
@@ -179,6 +218,8 @@ def read_chat_text(path):
         return _decode(f.read()), _name_from_filename(os.path.basename(path), display)
 
 
+# WhatsApp exports are usually UTF-8 (sometimes with a BOM), but older or Windows
+# exports can be UTF-16 or Latin-1 -- try encodings in order until one works.
 def _decode(raw):
     for enc in ("utf-8-sig", "utf-8", "utf-16", "latin-1"):
         try:
@@ -235,6 +276,14 @@ def split_stamp(stamp):
     return stamp, ""
 
 
+# detect_date_order() -- the one genuinely tricky bit.
+# A text export gives no locale hint, so dates may be D/M/Y, M/D/Y or ISO Y-M-D.
+# We infer the order from the data: scan every date and remember the largest value
+# seen in each position. A position that ever exceeds 12 must be the DAY (months
+# stop at 12); a 4-digit position is the YEAR. If day vs month is still ambiguous
+# (all values <= 12) we fall back to the natural default for the detected shape
+# (ISO => month-first, year-last => day-first). `forced` (from --date-order) wins.
+# Returns index positions into the split date as (year_idx, month_idx, day_idx).
 def detect_date_order(date_strings, forced=None):
     """Return (year_idx, month_idx, day_idx) into the split date parts."""
     if forced == "ymd":
@@ -305,6 +354,8 @@ def parse_date(ds, order):
     return y, mo, d
 
 
+# Parse a time token in 12h ("10:30:45 PM") or 24h ("22:30") form, tolerating the
+# narrow / no-break spaces WhatsApp sometimes inserts before AM/PM.
 def parse_time(ts):
     ts = _clean(ts).strip()
     m = TIME_RE.search(ts)
@@ -321,6 +372,15 @@ def parse_time(ts):
     return None
 
 
+# classify(body) -> (kind, media_type, view_once, edited, clean_text)
+# Identifies a message's type from WhatsApp's placeholder strings. iOS is
+# type-specific ("image omitted", "video omitted", ...); Android collapses all
+# media to "<Media omitted>". Also detects deleted messages, the trailing
+# "<This message was edited>" marker, and "<attached: file>" / Android
+# "(file attached)" media (mapped to a type by file extension).
+# NOTE on view_once: a text-only export writes the SAME placeholder for a
+# view-once photo as for a normal one, so this can only be flagged when an
+# explicit marker is present -- a best-effort signal, not a guarantee.
 def classify(text):
     """Return (kind, media_type, view_once, edited, clean_text)."""
     t = _clean(text)
@@ -372,6 +432,14 @@ def looks_system(rest_before_colon, whole):
     return any(mk in low for mk in SYSTEM_MARKERS)
 
 
+# parse() -> (messages, meta).  Two passes:
+#  Pass 1 walks each line and decides if it STARTS a message -- matching the iOS
+#    "[date, time] Sender: ..." bracket form or the Android "date, time - Sender:
+#    ..." dash form -- or is a CONTINUATION of the previous one (multi-line text),
+#    which gets appended. It also collects raw date strings for detect_date_order().
+#  Pass 2 builds each message dict: parse the datetime, split "Sender: body" on the
+#    first ": " (a line with no sender is a system/group event), then hand the body
+#    to classify() and tally words / emojis / links.
 def parse(text, forced_order=None):
     """Parse chat text into a list of message dicts + meta."""
     lines = text.split("\n")
@@ -472,6 +540,13 @@ WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", 
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
+# analyze() -> S, the stats dict the report is built from.
+# One main loop fills per-person accumulators (counts, words, chars, media, emojis,
+# links, per-hour/day/month histograms and a weekday x hour heatmap). It then
+# derives the rest: busiest day, streaks and silences, first-message-of-day, and --
+# in a second chronological pass -- conversation "sessions" (split by
+# session_gap_min minutes of silence), who starts them, reply times between
+# different senders, double-texts and monologues. compute_awards() ranks it all.
 def analyze(messages, session_gap_min=180):
     S = {}
     real = [m for m in messages if m["sender"] and m["kind"] != "system"]
@@ -740,6 +815,11 @@ def _median(sorted_list):
     return (sorted_list[n // 2 - 1] + sorted_list[n // 2]) / 2
 
 
+# compute_awards() -> list of award dicts, each carrying a FULL ranking.
+# The inner mk() helper takes a metric function, sorts everyone by it, formats each
+# value, and stores the winner plus the complete ordered list (so the report can
+# show the whole leaderboard, not just #1). reverse=False flips it for "lowest
+# wins" awards such as One-Word Wonder and Speed Replier.
 def compute_awards(S):
     pp = S["per_person"]
     senders = S["senders"]
@@ -814,6 +894,9 @@ def _fmt_dur(seconds):
 
 # --------------------------------------------------------------------------- #
 #  SVG chart helpers
+#  Charts are drawn by hand as inline <svg> strings -- no chart library and no
+#  JavaScript -- so the finished report is a single file that renders offline.
+#  Each helper returns an SVG string that build_html() drops straight into the page.
 # --------------------------------------------------------------------------- #
 
 PALETTE = ["#25D366", "#128C7E", "#34B7F1", "#7C5CFC", "#F5A623", "#EF476F",
@@ -1038,6 +1121,12 @@ def h(s):
     return html.escape(str(s))
 
 
+# build_html() -> one complete HTML document as a string.
+# Everything is assembled by appending fragments to `out`. The stylesheet is the
+# module-level CSS string (kept separate so its many braces do not clash with
+# f-strings). expand_all=True renders every award card pre-opened -- used for the
+# PDF / print copy. To add a section: compute it in analyze(), then append a block
+# here.
 def build_html(S, chat_name, source_name, me=None, expand_all=False):
     P = S["per_person"]
     senders = S["senders"]
@@ -1302,9 +1391,11 @@ def build_html(S, chat_name, source_name, me=None, expand_all=False):
 
 
 # --------------------------------------------------------------------------- #
-#  Main
+#  PDF export + command-line entry point
 # --------------------------------------------------------------------------- #
 
+# Locate an installed Chromium-family browser (Edge / Chrome / Chromium / Brave),
+# checking the PATH first and then the usual Windows / macOS install locations.
 def _find_chromium():
     import shutil
     for n in ("msedge", "microsoft-edge", "microsoft-edge-stable", "google-chrome",
@@ -1324,6 +1415,12 @@ def _find_chromium():
     return None
 
 
+# export_pdf() renders the already-expanded HTML to PDF with a 3-tier strategy,
+# preferring options that need no extra install:
+#   1. headless Edge/Chrome via --print-to-pdf (present on most PCs),
+#   2. weasyprint, if the user happens to have it installed,
+#   3. otherwise save a print-ready *_print.html and tell the user to press
+#      Ctrl+P -> Save as PDF.
 def export_pdf(expanded_html, pdf_path, out_html_path):
     """Render expanded_html to pdf_path. Returns (ok, detail).
 
@@ -1375,6 +1472,10 @@ def export_pdf(expanded_html, pdf_path, out_html_path):
     return False, "no Edge/Chrome/weasyprint found"
 
 
+# main() -- command-line entry point: parse args, run the pipeline, write the HTML
+# (and optionally the PDF), and print a short summary. Kept import-safe via the
+# __main__ guard at the bottom so the web / Pyodide layer can import this module
+# and call parse() / analyze() / build_html() without triggering the CLI.
 def main():
     ap = argparse.ArgumentParser(description="Analyze an exported WhatsApp chat into an HTML report.")
     ap.add_argument("input", help="Path to exported chat .zip, _chat.txt, or a folder")
